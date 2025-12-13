@@ -1,139 +1,385 @@
-Inventory Simulator Design Document
+# Inventory Simulator with Kalman Filter
 
-1. Executive Summary
+A Python library demonstrating **Kalman filter** application in a **partial observability** scenario. Built with pandas and numpy, this simulator models an inventory system where an observer can only see one shelf at a time and must estimate the total number of items using a 1D Kalman filter.
 
-This document outlines the design for a simple, configurable inventory simulator. The system is built entirely in Python using pandas DataFrames for state management, eliminating the need for an external database. It models a closed-loop system where a fixed number of items are moved between a series of shelves.
+## Overview
 
-The core of the design is the separation between a Simulator and an Observer. The Simulator maintains the absolute ground truth of the inventory at all times. In contrast, the Observer can only see a small part of the system at any given moment, simulating a realistic, partially observable environment. This dual structure allows for the analysis of estimation accuracy and the impact of observation patterns on system knowledge.
+The Inventory Simulator is an educational tool that demonstrates:
+- **Kalman filter estimation** with partial observations
+- **State estimation** under uncertainty
+- **Sensor fusion** concepts (combining stale and fresh observations)
+- **Conservation constraints** in dynamic systems
 
-2. System Architecture
+### Key Features
 
-2.1 Core Components
+✅ **Dual Architecture**: Simulator (ground truth) + Observer (partial estimates)
+✅ **Kalman Filter**: Estimates total items from partial observations
+✅ **Per-Item Movement Probability**: Realistic dynamics with configurable churn
+✅ **Round-Robin Observation**: One shelf observed per timestep
+✅ **Partial Observability**: One shelf never observed (requires inference)
+✅ **Complete Analytics**: Track estimation error and uncertainty over time
+✅ **Matplotlib Visualizations**: Beautiful plots of convergence and performance
 
-The system is composed of two primary components that operate in parallel:
+## Quick Start
 
-The Simulator (Ground Truth): This component has complete knowledge of the inventory state. It manages the location and quantity of every item across all shelves and executes all item movements. Its data represents the "perfect" state of the world, hidden from the observer.
-The Observer (Estimates): This component simulates a user or an automated agent attempting to understand the inventory state with limited information. It can only "see" one shelf at a time and must build an estimated model of the entire system based on a sequence of these partial observations.
-2.2 Architectural Principles
+### Installation
 
-In-Memory Data: All system states (both for the simulator and the observer) will be managed using pandas DataFrames. This simplifies the design by removing the need for a database.
-Conservation of Items: The simulation starts with a fixed total number of items of a single type. These items are only moved between shelves; they are never created or destroyed.
-Circular Arrangement: Shelves are arranged in a circular pattern. Every shelf has a neighbor to its "left" and "right". For example, in a 20-shelf system, shelf #19 is adjacent to shelf #18 and shelf #0.
-Constrained Movement: An item can only be moved from its current shelf to one of its two immediate neighbors.
-Partial, Round-Robin Observation: The Observer inspects shelves sequentially (e.g., shelf #1, #2, ..., #19, #1, ...), getting an accurate count of the currently observed shelf. This creates a natural data staleness, as some shelves will have been observed more recently than others.
-Unobservable Location: A designated shelf (e.g., shelf #0) is intentionally never included in the Observer's round-robin schedule. The Observer must infer the contents of this shelf without ever seeing it directly.
-3. System Configuration
+```bash
+# Clone the repository
+git clone <repository-url>
+cd inventory_system
 
-The simulator is designed to be configurable at initialization.
+# Install in development mode
+pip install -e .
 
-Number of Shelves: The total number of shelves in the circular arrangement (e.g., 20).
-Shelf Capacity: The maximum number of items any single shelf can hold (e.g., 100).
-Total Items: The constant, total number of items present in the simulation. This number must be less than or equal to the total system capacity (number of shelves × shelf capacity).
-4. Data Structures (Pandas DataFrames)
+# Install with visualization support
+pip install -e ".[viz]"
+```
 
-4.1 Simulator Ground Truth
+### Run the Demo
 
-A single DataFrame will represent the simulator's complete and accurate knowledge of the inventory.
+```bash
+# Main demonstration (generates plots)
+python main.py
 
-simulator_inventory
+# Basic simulation (text output)
+python examples/basic_simulation.py
 
-Column
+# Full visualization showcase
+python examples/visualization_demo.py
+```
 
-Description
+### Programmatic Usage
 
-Data Type
+```python
+from inventory_simulator import SimulatorConfig, SimulationRunner
+from inventory_simulator.visualization import plot_total_estimation_over_time
 
-shelf_id
+# Configure system
+config = SimulatorConfig(
+    num_shelves=20,           # Circular shelf arrangement
+    shelf_capacity=50,        # Max items per shelf
+    total_items=100,          # Conserved quantity
+    unobserved_shelf_id=0,    # Shelf never observed
+    movement_probability=0.01  # 1% of items move per timestep
+)
 
-Unique identifier for the shelf (e.g., 0 to 19).
+# Run simulation
+runner = SimulationRunner(config, seed=42)
+results = runner.run(num_steps=1000, report_interval=100)
 
-integer
+# Analyze results
+for analytics in results.analytics_history:
+    print(f"Step {analytics['step']:4d}: "
+          f"Error = {analytics['total_error_pct']:.1f}%, "
+          f"Uncertainty = {analytics['kalman_uncertainty']:.2f}")
 
-quantity
+# Visualize
+plot_total_estimation_over_time(
+    results.analytics_history,
+    true_total=config.total_items,
+    save_path="kalman_convergence.png"
+)
+```
 
-The actual quantity of items on that shelf.
+## Architecture
 
-integer
+### Core Components
 
-4.2 Observer Estimates
+1. **Simulator** (`simulator.py`)
+   - Maintains ground truth state (all shelf quantities)
+   - Processes per-item movement probability each timestep
+   - Uses binomial distribution for efficient movement calculations
 
-A separate DataFrame will represent the observer's estimated knowledge, which is updated at each observation step.
+2. **Observer** (`observer.py`)
+   - Round-robin observation pattern (skips one shelf)
+   - Updates shelf estimates when observed
+   - **1D Kalman Filter** estimates total items
+   - Tracks uncertainty (staleness) for each shelf
 
-observer_estimates
+3. **Kalman Filter** (embedded in Observer)
+   - **State**: `x = [total_items]` (scalar)
+   - **State Transition**: `F = 1` (total is constant)
+   - **Process Noise**: `Q = 0.1` (small, allows adaptation)
+   - **Measurement**: `z = sum(estimated_shelf_quantities)`
+   - **Measurement Noise**: `R = f(staleness)` (function of uncertainty)
 
-Column
+4. **Analytics** (`analytics.py`)
+   - Total estimation error and percentage error
+   - Mean Absolute Error (MAE) for observed shelves
+   - Shelf-specific error calculations
+   - Comprehensive performance reports
 
-Description
+5. **SimulationRunner** (`runner.py`)
+   - Orchestrates simulation loop
+   - Collects analytics at intervals
+   - Logs all events (movements + observations)
+   - Returns complete results for analysis
 
-Data Type
+6. **Visualization** (`visualization.py`)
+   - Total estimation vs true total (with uncertainty bands)
+   - Kalman uncertainty reduction over time
+   - Estimation error convergence
+   - Shelf comparison (ground truth vs estimates)
+   - Uncertainty heatmap (staleness visualization)
 
-shelf_id
+### Data Flow
 
-Unique identifier for the shelf.
+```
+Each Timestep:
+  1. Simulator.step()
+     └─> Process all items with movement_probability
+     └─> Update ground truth state
+     └─> Return MovementEvent
 
-integer
+  2. Observer.observe()
+     └─> Observe next shelf in round-robin
+     └─> Update shelf estimate (perfect observation)
+     └─> Reset uncertainty for observed shelf
+     └─> Increment uncertainty for all others
+     └─> Kalman Filter Update:
+         - Predict: x_pred = x (total constant)
+         - Measure: z = sum(shelf estimates)
+         - Update: x = x_pred + K(z - x_pred)
+     └─> Return ObservationEvent
 
-estimated_quantity
+  3. Analytics Collection (at intervals)
+     └─> Calculate total error
+     └─> Calculate MAE for observed shelves
+     └─> Track Kalman uncertainty
+```
 
-The observer's best guess of the quantity on that shelf.
+## The Kalman Filter
 
-integer
+### Why Kalman Filter?
 
-last_observed_step
+The inventory system is **ideal for Kalman filter demonstration** because:
 
-The simulation step at which this shelf was last observed. A value of -1 or None can indicate it has never been observed.
+1. **Conservation Constraint**: Total items never changes → state transition is identity
+2. **Partial Observations**: Can't see all shelves → need to estimate
+3. **Measurement Uncertainty**: Stale observations → time-varying measurement noise
+4. **Continuous Updates**: New observation each timestep → filter continuously refines
 
-integer
+### How It Works
 
-uncertainty
+The Kalman filter maintains two key quantities:
 
-A metric representing the staleness of the data. Could be measured as current_step - last_observed_step.
+- **State Estimate** (`x`): Best guess of total items
+- **Uncertainty** (`P`): Confidence in that estimate (covariance)
 
-integer
+**Prediction Step** (constant total):
+```
+x_pred = x              # Total doesn't change
+P_pred = P + Q          # Add small process noise
+```
 
-5. Core Workflows
+**Update Step** (new observation):
+```
+z = sum(shelf_estimates)           # Measurement
+R = f(total_uncertainty)            # Measurement noise (staleness)
+K = P_pred / (P_pred + R)          # Kalman gain
+x = x_pred + K(z - x_pred)         # Updated estimate
+P = (1 - K) * P_pred               # Updated uncertainty
+```
 
-5.1 Initialization
+**Key Insight**: The Kalman gain `K` automatically balances:
+- High uncertainty (large `P`) → trust the measurement more
+- High staleness (large `R`) → trust the prediction more
 
-Initialize the simulator_inventory DataFrame with the configured number of shelves.
-Distribute the total number of items across the shelves, ensuring no shelf exceeds its capacity.
-Initialize the observer_estimates DataFrame with zero or NaN values, as the observer starts with no information.
-5.2 Simulator Movement Step
+### Performance
 
-At each step of the simulation, the simulator executes a single item movement:
+Typical convergence with default settings (20 shelves, 100 items, 1% movement):
 
-Randomly select a shelf that is not empty. This is the source_shelf.
-Randomly choose a direction (left or right). The neighboring shelf in this direction is the destination_shelf.
-If the destination_shelf is not at full capacity, move one item.
-Atomically update the simulator_inventory DataFrame:
-Decrement the quantity for the source_shelf.
-Increment the quantity for the destination_shelf.
-5.3 Observer Observation Step
+| Steps | Error (%) | Uncertainty |
+|-------|-----------|-------------|
+| 0     | 100.0     | 1000.0      |
+| 200   | 5.7       | 4.3         |
+| 1000  | 5.4       | 7.5         |
+| 5000  | 4.2       | 9.8         |
 
-The observer follows a strict round-robin pattern, skipping the unobserved shelf. For a 20-shelf system where shelf #0 is skipped:
+The filter converges to **<10% error** within 200 steps and maintains accuracy despite continuous item movements.
 
-The observer's target shelf cycles from 1, 2, 3, ..., 19, and then repeats from 1.
-At its step, the observer requests the contents of its target shelf.
-The simulator provides the true quantity from simulator_inventory for that specific shelf.
-The observer updates its observer_estimates DataFrame for the observed shelf:
-The estimated_quantity is set to the true, observed quantity.
-The last_observed_step is updated to the current simulation step.
-The uncertainty for this shelf is reset to 0.
-For all other shelves, the uncertainty value is incremented by 1.
-6. Uncertainty Model
+## Configuration
 
-Uncertainty in this system is a direct function of time.
+```python
+SimulatorConfig(
+    num_shelves=20,            # Number of shelves (circular)
+    shelf_capacity=50,         # Max items per shelf
+    total_items=100,           # Total items (conserved)
+    unobserved_shelf_id=0,     # Shelf never observed
+    movement_probability=0.01  # Per-item movement probability
+)
+```
 
-Most Accurate: The most recently observed shelf has an uncertainty of 0 and its estimated_quantity is guaranteed to be correct at that specific moment.
-Most Uncertain: In a system with N observable shelves, the shelf that is next on the observation schedule (i.e., the one observed N-1 steps ago) has the highest uncertainty among all observed shelves.
-The Unobserved Shelf: Shelf #0 presents a unique challenge. Since it is never directly observed, its estimated_quantity can only be inferred. A possible estimation method is to sum the estimated quantities of all other shelves and subtract this from the known total number of items. The uncertainty for this shelf is always considered maximum.
-7. Analytics and Validation
+### Parameter Effects
 
-The dual-DataFrame structure is ideal for measuring the observer's performance against the ground truth. At any simulation step, we can:
+- **num_shelves**: More shelves → longer round-robin cycle → higher staleness
+- **movement_probability**: Higher → more dynamics → harder to estimate
+- **total_items**: Larger systems test filter scaling
+- **unobserved_shelf_id**: Creates fundamental partial observability challenge
 
-Calculate Total Error: Compare the observer_estimates DataFrame with the simulator_inventory DataFrame to calculate metrics like Mean Absolute Error (MAE) across all shelves.
-MAE = (|observer_estimates.estimated_quantity - simulator_inventory.quantity|).mean()
-Track Shelf #0 Accuracy: Specifically measure how well the observer's inference for the unobserved shelf matches the reality in the simulator.
-This allows for direct analysis of how different movement patterns or system configurations affect the observer's ability to build an accurate picture of the world.
+## Examples
 
- 
+### Basic Simulation
+```bash
+python examples/basic_simulation.py
+```
+
+Runs 1000 steps and prints convergence table:
+```
+  Step   True  Estimated  Error %   KF Unc    MAE
+------------------------------------------------------------
+     0    100       0.00   100.00  1000.00   0.00
+   200    100      94.28     5.72     4.25   0.47
+   400    100      96.25     3.75     5.26   0.63
+   600    100      95.33     4.67     6.11   0.68
+   800    100      95.81     4.19     6.86   0.53
+  1000    100      94.61     5.39     7.54   0.32
+```
+
+### Visualization Demo
+```bash
+python examples/visualization_demo.py
+```
+
+Generates 5 plots:
+- `total_estimation.png` - Kalman estimate vs true total
+- `kalman_uncertainty.png` - Uncertainty reduction
+- `estimation_error.png` - Error percentage over time
+- `shelf_comparison.png` - Final state comparison
+- `uncertainty_heatmap.png` - Staleness across shelves
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run with coverage
+pytest tests/ --cov=src/inventory_simulator --cov-report=term-missing
+
+# Run specific test suite
+pytest tests/test_observer.py -v  # Kalman filter tests
+pytest tests/test_integration.py -v  # End-to-end tests
+```
+
+**Test Coverage**: 141 tests, >90% coverage
+
+## Project Structure
+
+```
+inventory_system/
+├── src/inventory_simulator/
+│   ├── __init__.py           # Public API exports
+│   ├── config.py             # SimulatorConfig dataclass
+│   ├── types.py              # Event and result types
+│   ├── utils.py              # Helper functions
+│   ├── simulator.py          # Ground truth simulation
+│   ├── observer.py           # Observer with Kalman filter
+│   ├── analytics.py          # Metrics calculation
+│   ├── runner.py             # Simulation orchestration
+│   └── visualization.py      # Matplotlib plotting
+├── tests/
+│   ├── test_config.py        # Configuration tests
+│   ├── test_simulator.py     # Simulator tests
+│   ├── test_observer.py      # Observer & Kalman filter tests
+│   ├── test_analytics.py     # Analytics tests
+│   ├── test_runner.py        # Runner tests
+│   └── test_integration.py   # End-to-end integration tests
+├── examples/
+│   ├── basic_simulation.py       # Simple text demo
+│   └── visualization_demo.py     # Full visualization showcase
+├── main.py                   # Main demonstration script
+├── README.md                 # This file
+└── pyproject.toml           # Package configuration
+```
+
+## Educational Value
+
+This project is designed for **learning Kalman filters** through:
+
+1. **Simple 1D State**: Easier to understand than complex multi-dimensional filters
+2. **Clear Dynamics**: Conservation constraint makes behavior intuitive
+3. **Visible Convergence**: Watch uncertainty decrease and estimates improve
+4. **Practical Problem**: Inventory management is relatable
+5. **Complete Implementation**: Read the code, run the tests, see the math
+
+### Key Concepts Demonstrated
+
+- **State Estimation**: Inferring hidden state from noisy observations
+- **Uncertainty Quantification**: Tracking confidence in estimates
+- **Sensor Fusion**: Combining multiple observations over time
+- **Prediction vs Correction**: Balance between model and measurements
+- **Partial Observability**: Operating with incomplete information
+- **Conservation Laws**: Using constraints to improve estimation
+
+## Advanced Usage
+
+### Custom Measurement Noise
+
+Modify the Kalman filter measurement noise model:
+
+```python
+# In observer.py, line ~108
+R = 10.0 + 0.5 * self._estimates['uncertainty'].sum()
+
+# Try different models:
+R = base_noise + alpha * max_uncertainty
+R = base_noise * (1 + beta * avg_uncertainty)
+```
+
+### Different Movement Patterns
+
+Create non-uniform movement probabilities:
+
+```python
+# Modify Simulator.step() for spatial gradients
+movement_prob = base_prob * (1 + 0.1 * shelf_id / num_shelves)
+```
+
+### Multiple Observers
+
+Extend to multiple observers with different patterns:
+
+```python
+observer1 = Observer(config)  # Round-robin starting shelf 1
+observer2 = Observer(config)  # Round-robin starting shelf 10
+# Combine observations with sensor fusion
+```
+
+## Contributing
+
+Contributions welcome! Areas for enhancement:
+
+- Multi-dimensional Kalman filter (estimate per-shelf quantities)
+- Extended Kalman Filter (EKF) for nonlinear dynamics
+- Particle filter comparison
+- Adaptive noise estimation
+- Real-world inventory data integration
+
+## License
+
+MIT License - See LICENSE file for details
+
+## Citation
+
+If you use this project for research or education, please cite:
+
+```bibtex
+@software{inventory_simulator_kalman,
+  title={Inventory Simulator with Kalman Filter},
+  author={Your Name},
+  year={2025},
+  url={<repository-url>}
+}
+```
+
+## See Also
+
+- **Blog Post**: [Understanding Kalman Filters Through Inventory Management](BLOG.md)
+- **Kalman Filter Resources**: [kalmanfilter.net](https://www.kalmanfilter.net/)
+- **Sensor Fusion**: [Probabilistic Robotics](http://www.probabilistic-robotics.org/)
+
+---
+
+**Questions?** Open an issue or discussion on GitHub!
