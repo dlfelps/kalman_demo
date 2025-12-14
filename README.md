@@ -13,12 +13,19 @@ The Inventory Simulator is an educational tool that demonstrates:
 ### Key Features
 
 ✅ **Dual Architecture**: Simulator (ground truth) + Observer (partial estimates)
+
 ✅ **Kalman Filter**: Estimates total items from partial observations
+
 ✅ **Per-Item Movement Probability**: Realistic dynamics with configurable churn
+
 ✅ **Round-Robin Observation**: One shelf observed per timestep
+
 ✅ **Partial Observability**: One shelf never observed (requires inference)
+
 ✅ **Complete Analytics**: Track estimation error and uncertainty over time
+
 ✅ **Matplotlib Visualizations**: Beautiful plots of convergence and performance
+
 
 ## Quick Start
 
