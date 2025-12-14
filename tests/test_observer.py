@@ -18,7 +18,8 @@ class TestObserverInitialization:
 
         estimates = observer.get_estimates()
         assert isinstance(estimates, pd.DataFrame)
-        assert len(estimates) == 10
+        # With unobserved_shelf_id=0, shelf 0 is excluded from estimates
+        assert len(estimates) == 9
         assert 'shelf_id' in estimates.columns
         assert 'estimated_quantity' in estimates.columns
         assert 'last_observed_step' in estimates.columns
@@ -49,12 +50,13 @@ class TestObserverInitialization:
         assert all(estimates['uncertainty'] == 0)
 
     def test_observer_shelf_ids_sequential(self):
-        """Test that shelf IDs are sequential from 0 to num_shelves-1."""
+        """Test that shelf IDs are sequential, excluding shelf 0."""
         config = SimulatorConfig(num_shelves=12)
         observer = Observer(config)
 
         estimates = observer.get_estimates()
-        expected_ids = list(range(12))
+        # With unobserved_shelf_id=0, shelves 1-11 are tracked
+        expected_ids = list(range(1, 12))
         assert estimates['shelf_id'].tolist() == expected_ids
 
 
@@ -227,7 +229,7 @@ class TestObserverUnobservedShelf:
     """Test suite for unobserved shelf behavior."""
 
     def test_observer_unobserved_shelf_remains_zero(self):
-        """Test that unobserved shelf's estimate stays at 0 (no inference)."""
+        """Test that shelf 0 is excluded from estimates DataFrame."""
         config = SimulatorConfig(num_shelves=10, total_items=100, unobserved_shelf_id=0)
         sim = Simulator(config, seed=42)
         observer = Observer(config)
@@ -238,15 +240,12 @@ class TestObserverUnobservedShelf:
 
         estimates = observer.get_estimates()
 
-        # Shelf 0's estimate should remain 0 (observer doesn't know total_items)
-        shelf_0_estimate = estimates[
-            estimates['shelf_id'] == 0
-        ]['estimated_quantity'].iloc[0]
-
-        assert shelf_0_estimate == 0
+        # Shelf 0 should not be in the estimates DataFrame
+        shelf_0_rows = estimates[estimates['shelf_id'] == 0]
+        assert len(shelf_0_rows) == 0
 
     def test_observer_unobserved_shelf_never_directly_updated(self):
-        """Test that unobserved shelf's last_observed_step stays -1."""
+        """Test that shelf 0 is not tracked in estimates DataFrame."""
         config = SimulatorConfig(num_shelves=10, total_items=100, unobserved_shelf_id=0)
         sim = Simulator(config, seed=42)
         observer = Observer(config)
@@ -257,31 +256,28 @@ class TestObserverUnobservedShelf:
 
         estimates = observer.get_estimates()
 
-        # Shelf 0 should never have been directly observed
-        shelf_0_last_observed = estimates[
-            estimates['shelf_id'] == 0
-        ]['last_observed_step'].iloc[0]
-
-        assert shelf_0_last_observed == -1
+        # Shelf 0 should not be in the DataFrame at all
+        shelf_0_rows = estimates[estimates['shelf_id'] == 0]
+        assert len(shelf_0_rows) == 0
 
     def test_observer_unobserved_shelf_uncertainty_increases(self):
-        """Test that unobserved shelf's uncertainty keeps increasing."""
+        """Test that shelf 0 is completely excluded from tracking."""
         config = SimulatorConfig(num_shelves=10, total_items=100, unobserved_shelf_id=0)
         sim = Simulator(config, seed=42)
         observer = Observer(config)
 
-        # Observe 20 times
-        for step in range(20):
+        # Observe 9 times (one complete cycle through shelves 1-9)
+        for step in range(9):
             observer.observe(sim, step)
 
         estimates = observer.get_estimates()
 
-        # Shelf 0's uncertainty should be 20 (incremented every step)
-        shelf_0_uncertainty = estimates[
-            estimates['shelf_id'] == 0
-        ]['uncertainty'].iloc[0]
+        # Shelf 0 should not be in the DataFrame at all
+        shelf_0_rows = estimates[estimates['shelf_id'] == 0]
+        assert len(shelf_0_rows) == 0
 
-        assert shelf_0_uncertainty == 20
+        # Only 9 shelves should be tracked (1-9)
+        assert len(estimates) == 9
 
 
 class TestObserverEdgeCases:
@@ -461,3 +457,51 @@ class TestObserverKalmanFilter:
         # Uncertainty change should be small (stabilizing)
         relative_change = abs(uncertainty_100 - uncertainty_50) / uncertainty_50
         assert relative_change < 0.5  # Less than 50% change
+
+    def test_observer_estimates_exclude_shelf_0(self):
+        """Test that estimates DataFrame excludes shelf 0 when it's the unobserved shelf."""
+        config = SimulatorConfig(num_shelves=20, unobserved_shelf_id=0)
+        observer = Observer(config)
+
+        estimates = observer.get_estimates()
+
+        # Should have 19 rows (shelves 1-19), not 20
+        assert len(estimates) == 19
+
+        # Shelf 0 should not be in the DataFrame
+        assert 0 not in estimates['shelf_id'].values
+
+        # Should contain shelves 1-19
+        assert set(estimates['shelf_id']) == set(range(1, 20))
+
+    def test_observer_process_noise_from_config(self):
+        """Test that Kalman filter uses process_noise_q from config."""
+        config = SimulatorConfig(num_shelves=10, process_noise_q=5.0)
+        observer = Observer(config)
+
+        # Process noise should be set from config
+        assert observer._kf_process_noise == 5.0
+
+    def test_observer_measurement_sums_only_tracked_shelves(self):
+        """Test that Kalman measurement sums only tracked shelves (excludes shelf 0)."""
+        config = SimulatorConfig(num_shelves=10, total_items=100, unobserved_shelf_id=0)
+        sim = Simulator(config, seed=42)
+        observer = Observer(config)
+
+        # Observe all shelves once
+        for step in range(9):
+            observer.observe(sim, step)
+
+        # Get estimates
+        estimates = observer.get_estimates()
+
+        # Measurement sum should only include shelves 1-9
+        measurement_sum = estimates['estimated_quantity'].sum()
+
+        # This sum should NOT include shelf 0's quantity
+        total_with_shelf_0 = sim.get_state()['quantity'].sum()
+        shelf_0_qty = sim.get_quantity(0)
+
+        # Verify measurement excludes shelf 0
+        expected_sum = total_with_shelf_0 - shelf_0_qty
+        assert measurement_sum <= expected_sum

@@ -95,6 +95,21 @@ class Analytics:
         return int(estimated_qty - true_qty)
 
     @staticmethod
+    def calculate_items_on_shelf_0(ground_truth: pd.DataFrame) -> int:
+        """Calculate the number of items on shelf 0 (lost items in trap mode).
+
+        Args:
+            ground_truth: DataFrame with columns 'shelf_id', 'quantity'.
+
+        Returns:
+            Number of items on shelf 0, or 0 if shelf 0 not found.
+        """
+        shelf_0_row = ground_truth[ground_truth['shelf_id'] == 0]
+        if len(shelf_0_row) == 0:
+            return 0
+        return int(shelf_0_row['quantity'].iloc[0])
+
+    @staticmethod
     def generate_report(
         ground_truth: pd.DataFrame,
         estimates: pd.DataFrame,
@@ -112,24 +127,36 @@ class Analytics:
 
         Returns:
             Dictionary with metrics:
-            - total_error: Absolute error in total estimation
+            - total_error: Absolute error in total estimation (vs observed total)
             - total_error_pct: Percentage error in total
             - kalman_uncertainty: Kalman filter covariance
             - mae: Mean absolute error for observed shelves
             - max_shelf_uncertainty: Maximum staleness across shelves
-            - true_total: Ground truth total
+            - true_total: Ground truth total of OBSERVED shelves only (excludes shelf 0)
+            - true_total_system: Ground truth total of ALL shelves (includes shelf 0)
+            - items_on_shelf_0: Number of items on shelf 0
             - estimated_total: Kalman filter estimate
         """
-        true_total = int(ground_truth['quantity'].sum())
+        # Calculate system total (all shelves including shelf 0)
+        true_total_system = int(ground_truth['quantity'].sum())
+
+        # Calculate observed total (shelves excluding shelf 0)
+        observed_shelves_truth = ground_truth[ground_truth['shelf_id'] != 0]
+        true_total_observed = int(observed_shelves_truth['quantity'].sum())
+
+        # Calculate items on shelf 0
+        items_on_shelf_0 = Analytics.calculate_items_on_shelf_0(ground_truth)
 
         return {
-            'true_total': true_total,
+            'true_total': true_total_observed,  # Observed total (shelves 1-N)
+            'true_total_system': true_total_system,  # System total (all shelves)
+            'items_on_shelf_0': items_on_shelf_0,  # Items lost to shelf 0
             'estimated_total': estimated_total,
             'total_error': Analytics.calculate_total_error(
-                true_total, estimated_total
+                true_total_observed, estimated_total
             ),
             'total_error_pct': Analytics.calculate_total_error_percentage(
-                true_total, estimated_total
+                true_total_observed, estimated_total
             ),
             'kalman_uncertainty': total_uncertainty,
             'mae': Analytics.calculate_mae(ground_truth, estimates),

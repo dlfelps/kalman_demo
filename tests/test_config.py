@@ -25,9 +25,12 @@ class TestSimulatorConfig:
         config = SimulatorConfig()
         assert config.num_shelves == 20
         assert config.shelf_capacity == 50
-        assert config.total_items == 100
+        assert config.total_items == 300
         assert config.unobserved_shelf_id == 0
         assert config.movement_probability == 0.01
+        assert config.shelf_0_mode == "normal"
+        assert config.trap_start_step == 150
+        assert config.process_noise_q == 0.1
 
     def test_config_validation_too_many_items(self):
         """Test that validation rejects configurations with too many items."""
@@ -127,3 +130,72 @@ class TestSimulatorConfig:
         """Test that movement_probability > 1.0 is rejected."""
         with pytest.raises(ValueError, match="movement_probability.*must be.*between 0 and 1"):
             SimulatorConfig(movement_probability=1.5)
+
+    # Tests for new dynamic shelf 0 behavior parameters
+
+    def test_shelf_0_mode_default(self):
+        """Test that default shelf_0_mode is 'normal'."""
+        config = SimulatorConfig()
+        assert config.shelf_0_mode == "normal"
+
+    def test_shelf_0_mode_valid_normal(self):
+        """Test that shelf_0_mode='normal' is valid."""
+        config = SimulatorConfig(shelf_0_mode="normal")
+        assert config.shelf_0_mode == "normal"
+
+    def test_shelf_0_mode_valid_leak_then_trap(self):
+        """Test that shelf_0_mode='leak_then_trap' is valid."""
+        config = SimulatorConfig(shelf_0_mode="leak_then_trap")
+        assert config.shelf_0_mode == "leak_then_trap"
+
+    def test_shelf_0_mode_invalid(self):
+        """Test that invalid shelf_0_mode is rejected."""
+        with pytest.raises(ValueError, match="shelf_0_mode must be"):
+            SimulatorConfig(shelf_0_mode="invalid_mode")
+
+    def test_trap_start_step_default(self):
+        """Test that default trap_start_step is 150."""
+        config = SimulatorConfig()
+        assert config.trap_start_step == 150
+
+    def test_trap_start_step_valid(self):
+        """Test that positive trap_start_step is valid."""
+        config = SimulatorConfig(trap_start_step=100)
+        assert config.trap_start_step == 100
+
+    def test_trap_start_step_zero(self):
+        """Test that trap_start_step=0 is valid (trap active from start)."""
+        config = SimulatorConfig(trap_start_step=0)
+        assert config.trap_start_step == 0
+
+    def test_trap_start_step_negative(self):
+        """Test that negative trap_start_step is rejected."""
+        with pytest.raises(ValueError, match="trap_start_step must be non-negative"):
+            SimulatorConfig(trap_start_step=-10)
+
+    def test_process_noise_q_default(self):
+        """Test that default process_noise_q is 0.1."""
+        config = SimulatorConfig()
+        assert config.process_noise_q == 0.1
+
+    def test_process_noise_q_valid(self):
+        """Test that positive process_noise_q is valid."""
+        config = SimulatorConfig(process_noise_q=10.0)
+        assert config.process_noise_q == 10.0
+
+    def test_process_noise_q_zero(self):
+        """Test that process_noise_q=0 is valid (no process noise)."""
+        config = SimulatorConfig(process_noise_q=0.0)
+        assert config.process_noise_q == 0.0
+
+    def test_process_noise_q_negative(self):
+        """Test that negative process_noise_q is rejected."""
+        with pytest.raises(ValueError, match="process_noise_q must be non-negative"):
+            SimulatorConfig(process_noise_q=-1.0)
+
+    def test_config_defaults_include_new_params(self):
+        """Test that new parameters have correct defaults for backward compatibility."""
+        config = SimulatorConfig()
+        assert config.shelf_0_mode == "normal"
+        assert config.trap_start_step == 150
+        assert config.process_noise_q == 0.1

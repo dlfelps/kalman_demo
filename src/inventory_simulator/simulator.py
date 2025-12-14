@@ -33,6 +33,7 @@ class Simulator:
         self.config = config
         self._rng = np.random.default_rng(seed)
         self._current_step = 0
+        self._trap_active = False  # Track trap state for leak_then_trap mode
 
         # Initialize inventory DataFrame
         quantities = distribute_items_randomly(
@@ -59,6 +60,12 @@ class Simulator:
             For compatibility, returns event with source_shelf=0, destination_shelf=0
             if no movements occurred.
         """
+        # Activate trap at trap_start_step in leak_then_trap mode
+        if (not self._trap_active and
+            self.config.shelf_0_mode == "leak_then_trap" and
+            self._current_step >= self.config.trap_start_step):
+            self._trap_active = True
+
         total_movements = 0
         last_source = 0
         last_dest = 0
@@ -69,6 +76,10 @@ class Simulator:
 
         # Process each shelf based on INITIAL quantities
         for shelf_id in range(self.config.num_shelves):
+            # Skip shelf 0 if trap is active (items can't leave)
+            if shelf_id == 0 and self._trap_active:
+                continue
+
             initial_qty = initial_quantities.iloc[shelf_id]
 
             if initial_qty == 0:

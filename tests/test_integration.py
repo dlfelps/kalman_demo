@@ -25,9 +25,9 @@ class TestSmallSimulation:
 
         results = runner.run(num_steps=100)
 
-        # Check all analytics reports
+        # Check all analytics reports - system total should remain constant
         for analytics in results.analytics_history:
-            assert analytics['true_total'] == 50
+            assert analytics['true_total_system'] == 50
 
 
 class TestMediumSimulation:
@@ -50,9 +50,9 @@ class TestMediumSimulation:
 
         results = runner.run(num_steps=1000)
 
-        # All reports should have true_total = 100
+        # All reports should have true_total_system = 100 (system conserves total)
         for analytics in results.analytics_history:
-            assert analytics['true_total'] == 100
+            assert analytics['true_total_system'] == 100
 
 
 class TestLargeSimulation:
@@ -85,9 +85,9 @@ class TestLargeSimulation:
 
         results = runner.run(num_steps=5000, report_interval=1000)
 
-        # Verify conservation
+        # Verify conservation - system total should remain constant
         for analytics in results.analytics_history:
-            assert analytics['true_total'] == 1000
+            assert analytics['true_total_system'] == 1000
 
 
 class TestKalmanFilterConvergence:
@@ -180,9 +180,9 @@ class TestMovementProbabilityIntegration:
 
         results = runner.run(num_steps=100)
 
-        # Ground truth should not change
-        initial_truth = results.analytics_history[0]['true_total']
-        final_truth = results.analytics_history[-1]['true_total']
+        # Ground truth system total should not change
+        initial_truth = results.analytics_history[0]['true_total_system']
+        final_truth = results.analytics_history[-1]['true_total_system']
 
         assert initial_truth == final_truth == 100
 
@@ -191,7 +191,7 @@ class TestObserverIntegration:
     """Test suite for Observer behavior in full simulation."""
 
     def test_observer_never_observes_unobserved_shelf(self):
-        """Test that unobserved shelf is never directly observed."""
+        """Test that shelf 0 is excluded from estimates DataFrame."""
         config = SimulatorConfig(num_shelves=10, total_items=100, unobserved_shelf_id=0)
         runner = SimulationRunner(config, seed=42)
 
@@ -200,13 +200,13 @@ class TestObserverIntegration:
         # Check final estimates
         final_estimates = results.final_estimates
 
-        # Shelf 0 should have last_observed_step = -1 (never observed)
-        shelf_0_last_observed = final_estimates.loc[0, 'last_observed_step']
-        assert shelf_0_last_observed == -1
+        # Shelf 0 should NOT be in the DataFrame at all
+        shelf_0_rows = final_estimates[final_estimates['shelf_id'] == 0]
+        assert len(shelf_0_rows) == 0
 
-        # Shelf 0 estimate should remain 0
-        shelf_0_estimate = final_estimates.loc[0, 'estimated_quantity']
-        assert shelf_0_estimate == 0
+        # Estimates should only contain shelves 1-9
+        assert len(final_estimates) == 9
+        assert set(final_estimates['shelf_id']) == set(range(1, 10))
 
     def test_observer_uncertainty_increases_for_unobserved(self):
         """Test that uncertainty increases for shelves not recently observed."""
@@ -217,12 +217,12 @@ class TestObserverIntegration:
 
         final_estimates = results.final_estimates
 
-        # Shelf 0 should have high uncertainty (never observed)
-        shelf_0_uncertainty = final_estimates.loc[0, 'uncertainty']
-        assert shelf_0_uncertainty == 200  # Incremented every step
+        # Shelf 0 should NOT be in the DataFrame
+        assert 0 not in final_estimates['shelf_id'].values
 
         # Recently observed shelves should have low uncertainty
-        shelf_9_uncertainty = final_estimates.loc[9, 'uncertainty']
+        shelf_9_row = final_estimates[final_estimates['shelf_id'] == 9]
+        shelf_9_uncertainty = shelf_9_row['uncertainty'].iloc[0]
         assert shelf_9_uncertainty < 10
 
 
@@ -264,4 +264,4 @@ class TestEndToEndScenario:
 
         # Should complete successfully despite high churn
         assert results is not None
-        assert results.analytics_history[-1]['true_total'] == 100
+        assert results.analytics_history[-1]['true_total_system'] == 100

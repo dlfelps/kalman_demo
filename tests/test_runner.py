@@ -112,9 +112,9 @@ class TestRunnerAnalytics:
 
         results = runner.run(num_steps=100, report_interval=20)
 
-        # All reports should have true_total = 100
+        # All reports should have true_total_system = 100 (conservation)
         for analytics in results.analytics_history:
-            assert analytics['true_total'] == 100
+            assert analytics['true_total_system'] == 100
 
 
 class TestRunnerReproducibility:

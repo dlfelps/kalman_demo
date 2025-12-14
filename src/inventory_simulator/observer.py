@@ -41,12 +41,22 @@ class Observer:
             if shelf_id != config.unobserved_shelf_id
         ]
 
-        # Initialize estimates DataFrame
+        # Create list of shelves to track in estimates
+        # If unobserved shelf is 0, exclude it entirely from tracking
+        if config.unobserved_shelf_id == 0:
+            shelf_ids_to_track = list(range(1, config.num_shelves))
+        else:
+            shelf_ids_to_track = [
+                shelf_id for shelf_id in range(config.num_shelves)
+                if shelf_id != config.unobserved_shelf_id
+            ]
+
+        # Initialize estimates DataFrame (excludes unobserved shelf if it's shelf 0)
         self._estimates = pd.DataFrame({
-            'shelf_id': list(range(config.num_shelves)),
-            'estimated_quantity': [0] * config.num_shelves,
-            'last_observed_step': [-1] * config.num_shelves,
-            'uncertainty': [0] * config.num_shelves
+            'shelf_id': shelf_ids_to_track,
+            'estimated_quantity': [0] * len(shelf_ids_to_track),
+            'last_observed_step': [-1] * len(shelf_ids_to_track),
+            'uncertainty': [0] * len(shelf_ids_to_track)
         })
 
         # Initialize 1D Kalman filter for total estimation
@@ -56,16 +66,16 @@ class Observer:
         # Covariance: initial uncertainty (high)
         self._kf_covariance = 1000.0
 
-        # Process noise: small (total is constant due to conservation)
-        self._kf_process_noise = 0.1
+        # Process noise: configurable (small for static systems, higher for dynamic)
+        self._kf_process_noise = config.process_noise_q
 
     def observe(self, simulator: Simulator, current_step: int) -> ObservationEvent:
         """Observe one shelf and update estimates.
 
         Follows round-robin pattern through observable shelves, updates the
         estimate for the observed shelf, and increments uncertainty for all other
-        shelves. The unobserved shelf is never directly observed and its estimate
-        remains at 0.
+        tracked shelves. If the unobserved shelf is shelf 0, it is excluded
+        from the estimates DataFrame entirely.
 
         Args:
             simulator: The simulator to observe from.
@@ -80,21 +90,23 @@ class Observer:
         # Request true quantity from simulator
         true_quantity = simulator.get_quantity(observed_shelf_id)
 
-        # Get previous estimate for this shelf
+        # Get previous estimate for this shelf using shelf_id column lookup
+        shelf_mask = self._estimates['shelf_id'] == observed_shelf_id
         previous_estimate = int(
-            self._estimates.loc[observed_shelf_id, 'estimated_quantity']
+            self._estimates.loc[shelf_mask, 'estimated_quantity'].iloc[0]
         )
 
-        # Update estimate for observed shelf
-        self._estimates.loc[observed_shelf_id, 'estimated_quantity'] = true_quantity
-        self._estimates.loc[observed_shelf_id, 'last_observed_step'] = current_step
-        self._estimates.loc[observed_shelf_id, 'uncertainty'] = 0
+        # Update estimate for observed shelf using shelf_id column lookup
+        self._estimates.loc[shelf_mask, 'estimated_quantity'] = true_quantity
+        self._estimates.loc[shelf_mask, 'last_observed_step'] = current_step
+        self._estimates.loc[shelf_mask, 'uncertainty'] = 0
 
-        # Increment uncertainty for all other shelves
-        for shelf_id in range(self.config.num_shelves):
+        # Increment uncertainty for all other shelves (only those in the DataFrame)
+        for shelf_id in self._estimates['shelf_id']:
             if shelf_id != observed_shelf_id:
-                current_uncertainty = self._estimates.loc[shelf_id, 'uncertainty']
-                self._estimates.loc[shelf_id, 'uncertainty'] = current_uncertainty + 1
+                shelf_mask = self._estimates['shelf_id'] == shelf_id
+                current_uncertainty = self._estimates.loc[shelf_mask, 'uncertainty'].iloc[0]
+                self._estimates.loc[shelf_mask, 'uncertainty'] = current_uncertainty + 1
 
         # Update Kalman filter for total estimation
         # Predict step (state doesn't change since total is constant)
